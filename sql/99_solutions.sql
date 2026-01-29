@@ -349,3 +349,74 @@ WHERE s.end_date IS NULL
   AND a.user_id IS NULL
 GROUP BY signup_week, weeks_since_signup
 ORDER BY signup_week, weeks_since_signup;
+
+-- -----------------------------------------------------
+-- Stretch Solutions (more PM-like analysis)
+-- -----------------------------------------------------
+
+-- S1) Which plan has the highest proportion of refunded invoices?
+SELECT
+  p.name AS plan,
+  ROUND(
+    100.0 * SUM(CASE WHEN i.refunded THEN 1 ELSE 0 END)::numeric
+    / COUNT(*)::numeric,
+    1
+  ) AS refund_rate_pct
+FROM invoices i
+JOIN subscriptions s
+  ON i.subscription_id = s.id
+JOIN plans p
+  ON s.plan_id = p.id
+GROUP BY p.name
+ORDER BY refund_rate_pct DESC;
+
+
+-- S2) Do activated users generate higher revenue?
+-- Compare revenue per user for activated vs not_activated users
+
+WITH activated AS (
+  SELECT DISTINCT u.id AS user_id
+  FROM users u
+  JOIN events e
+    ON e.user_id = u.id
+  WHERE e.event_type = 'feature_use'
+    AND e.event_date <= u.signup_date + INTERVAL '7 days'
+),
+revenue_per_user AS (
+  SELECT
+    u.id AS user_id,
+    SUM(CASE WHEN i.refunded = false THEN i.amount ELSE 0 END) AS revenue
+  FROM users u
+  JOIN subscriptions s
+    ON s.user_id = u.id
+  JOIN invoices i
+    ON i.subscription_id = s.id
+  GROUP BY u.id
+)
+SELECT
+  CASE
+    WHEN a.user_id IS NULL THEN 'not_activated'
+    ELSE 'activated'
+  END AS segment,
+  COUNT(*) AS users,
+  ROUND(AVG(r.revenue)::numeric, 2) AS avg_revenue_per_user,
+  ROUND(SUM(r.revenue)::numeric, 2) AS total_revenue
+FROM revenue_per_user r
+JOIN users u
+  ON u.id = r.user_id
+LEFT JOIN activated a
+  ON a.user_id = u.id
+GROUP BY segment
+ORDER BY total_revenue DESC;
+
+
+-- S3) One metric to prioritise improving onboarding (commentary)
+-- Answer:
+-- I would prioritise increasing the % of users who trigger
+-- 'feature_use' within the first 7 days after signup.
+--
+-- This metric represents users reaching a meaningful moment
+-- of value early, and it is strongly correlated with both
+-- retention and downstream revenue in this dataset.
+
+
